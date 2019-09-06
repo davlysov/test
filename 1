@@ -1,0 +1,1072 @@
+import * as React from 'react';
+import { connect } from 'react-redux';
+import { Input, Row, Col, Checkbox, Form, Menu, Dropdown } from 'antd';
+
+import orderBy from 'lodash-es/orderBy';
+
+import { IDataProvider } from '../../interfaces/IDataProvider';
+import { IPresets } from '../../interfaces/IPreset';
+
+import {
+	dataProviderDeleteAllFilters,
+	dataProviderDeleteFilter,
+	dataProviderSetFilter,
+	dataProviderSort,
+	dataProviderDeleteAllFiltersAndSorts
+} from '../data-provider/DataProviderModel';
+
+import Popup from '../popup/Popup';
+import DndList from '../dnd-list/DndList';
+
+import Lang from '../../Lang';
+import { ITable } from '../table/ITable';
+import { 
+	tableShowAllColumns, 
+	getHiddenColumnCount,
+} from '../table/TableModel';
+
+import { tableReorderColumns } from '../table/TableStructureModel';
+
+import {
+	saveComponentCustomizationSetting,
+	getComponentCustomizationSetting,
+	deleteComponentCustomizationSetting,
+	presetsSet
+} from '../../AppConfigModel';
+
+export const SHOW_IN_TABLE_SETUP_DROPDOWN = 'TableSetup.showFilter';
+export const DISPLAYED_FILTER_NAME = 'TableSetup.filterName';
+
+interface IProps {
+	dataProvider: IDataProvider;
+	content: any;
+	allowReorderColumns?: boolean;
+	hiddenColumnsIds?: string[];
+	customizing?: boolean;
+}
+
+interface IActionsProps {
+	dataProviderDeleteFilter: Function;
+	dataProviderDeleteAllFilters: Function;
+	dataProviderSetFilter: Function;
+	dataProviderSort: Function;
+	dataProviderDeleteAllFiltersAndSorts: Function;
+	tableShowAllColumns: Function;
+	tableReorderColumns: Function;
+	saveComponentCustomizationSetting?: Function;
+	getComponentCustomizationSetting?: Function;
+	deleteComponentCustomizationSetting?: Function;
+	presetsSet?: Function;
+}
+
+interface IConnectedProps {
+	presets: IPresets;
+}
+
+interface IState {
+	tableConfigurationPopupIsVisible?: boolean;
+	headers?: any;
+	filters?: any;
+	sortings?: any;
+	presetName?: any;
+	presets: any;
+	savePreset: boolean;
+}
+
+class TableSetup extends React.Component<IProps & IActionsProps & IConnectedProps, IState> {
+	searchElement;
+
+	titlesById = {};
+
+	private dndListRefresh;
+	private checkboxWithNameRefresh;
+	private simpleListRefresh;
+
+	private settingKey;
+
+	private tableId;
+
+	private defaultPreset;
+
+	private titleBarText;
+
+	constructor(props: IProps & IActionsProps & IConnectedProps) {
+		super(props);
+
+		this.titleBarText = <Lang id={ props.customizing ? 'Presets configuration' : 'Column configuration'} />;
+
+		this.dndListRefresh = true;
+		this.checkboxWithNameRefresh = true;
+		this.simpleListRefresh = true;
+
+		this.settingKey = `${this.constructor.name}-${props.dataProvider.id}`;
+
+		this.tableId = (props.content as ITable).id;
+
+		const headers = (this.props.content as ITable).structure.headers;
+		this.defaultPreset = {
+			headers,
+			filters: [],
+			sortings: []
+		};
+
+		if (props.allowReorderColumns) {
+			this.state = this.getInitialState();
+		}
+	}
+
+	iterateHeaders = headers => {
+		headers.forEach(header => {
+			if (!header.headers || !header.headers.length) {
+				this.titlesById[header.column.id] = header.caption;
+			} else {
+				this.iterateHeaders(header.headers);
+			}
+		});
+	};
+
+	getInitialState = () => {
+		return {
+			tableConfigurationPopupIsVisible: false,
+			headers: false,
+			filters: false,
+			sortings: false,
+			presetName: '',
+			presets: [],
+			savePreset: false
+		};
+	};
+
+	removeFilters = () => {
+		const { 
+			dataProvider, 
+			dataProviderDeleteAllFilters 
+		} = this.props;
+
+		dataProviderDeleteAllFilters(dataProvider.id);
+	};
+
+	removeFilter = fieldId => {
+		const { dataProvider, dataProviderDeleteFilter } = this.props;
+		dataProviderDeleteFilter(dataProvider.id, fieldId);
+	};
+
+	onShowAllColumns = () => {
+		const { tableShowAllColumns } = this.props;
+
+		tableShowAllColumns(this.tableId);
+	};
+
+	getAllHiddenColumnCount = () => {
+		return getHiddenColumnCount(this.props.content as ITable);
+	};
+
+	applyPreset = (tableId, dataProviderId, preset) => {
+		const { headers, filters, sortings } = preset;
+
+		const {
+			tableReorderColumns,
+			dataProviderDeleteAllFiltersAndSorts,
+			dataProviderSetFilter,
+			dataProviderSort
+		} = this.props;
+
+		if (tableId && headers) {
+			tableReorderColumns(tableId, headers);
+		}
+
+		if (!dataProviderId) {
+			return null;
+		}
+
+		dataProviderDeleteAllFiltersAndSorts(dataProviderId);
+
+		filters &&
+			filters.length > 0 &&
+			filters.forEach(filter => {
+				dataProviderSetFilter(dataProviderId, filter);
+			});
+
+		sortings &&
+			sortings.length > 0 &&
+			sortings.forEach(({ fieldId, sorting }) => {
+				dataProviderSort(dataProviderId, fieldId, sorting);
+			});
+
+		return null;
+	};
+
+	componentDidMount() {
+		const {
+			customizing,
+			getComponentCustomizationSetting,
+			content,
+			dataProvider
+		} = this.props;
+
+		this.iterateHeaders((content as ITable).structure.headers);
+
+		if (customizing) {
+			let settingsValue = getComponentCustomizationSetting(this.settingKey);
+
+			settingsValue.then(
+				res => {
+					if (res && res.presets && res.presets.length > 0) {
+						const preset = res.presets.find(({ active }) => active === true);
+						const currentPreset = res.presets.find(
+							({ name }) => name === '@@current'
+						);
+						const dataProviderId = dataProvider.id;
+						const tableId = res.tableId;
+
+						if (preset) {
+							this.applyPreset(tableId, dataProviderId, preset);
+						} else if (currentPreset) {
+							this.applyPreset(tableId, dataProviderId, currentPreset);
+						}
+					}
+				},
+				error => { }
+			);
+		}
+	}
+
+	createSettingValue = (tableId, presets) => {
+		return {
+			tableId,
+			presets
+		};
+	};
+
+	addPresetToPresets = (presets, preset, presetName, presetActive) => {
+		let newPresets = [];
+
+		if (presets && presets.length > 0) {
+			newPresets = presets
+				.map(preset => ({ ...preset, active: false }))
+				.filter(({ name }) => name !== presetName);
+		}
+
+		newPresets.push({
+			headers: preset.headers,
+			filters: preset.filters,
+			sortings: preset.sortings,
+			name: presetName,
+			active: presetActive
+		});
+
+		return orderBy(newPresets, 'active', ['desc']);
+	};
+
+	get popupConfig() {
+		const { tableConfigurationPopupIsVisible } = this.state;
+
+		return {
+			show: !!tableConfigurationPopupIsVisible,
+			className: 'popup-table-setup',
+			titleBar: {
+				enable: true,
+				text: this.titleBarText
+			},
+			buttons: [
+				{
+					html: <Lang id='Set default' />,
+					className: 'btn btn-default',
+					onClick: () => {
+						this.handleSetDefault();
+					}
+				},
+				{
+					html: <Lang id='Cancel' />,
+					className: 'btn btn-default',
+					onClick: () => {
+						this.setState(this.getInitialState());
+					}
+				},
+				{
+					html: <Lang id='Apply' />,
+					className: 'btn btn-success',
+					onClick: () => {
+						const {
+							saveComponentCustomizationSetting,
+							customizing,
+							dataProvider,
+							presetsSet
+						} = this.props;
+
+						const {
+							headers,
+							filters,
+							sortings,
+							savePreset,
+							presets
+						} = this.state;
+
+						const dataProviderId = dataProvider.id;
+
+						const preset = {
+							headers,
+							filters,
+							sortings
+						};
+
+						this.applyPreset(this.tableId, dataProviderId, preset);
+
+						if (!customizing) {
+							this.setState(this.getInitialState());
+							return;
+						}
+
+						if (savePreset) {
+							const newPresets = this.addPresetToPresets(
+								this.state.presets,
+								preset,
+								this.state.presetName,
+								true
+							);
+							const settingValue = this.createSettingValue(
+								this.tableId,
+								newPresets
+							);
+
+							if (
+								settingValue &&
+								settingValue.presets &&
+								settingValue.presets.length > 0
+							) {
+								saveComponentCustomizationSetting(
+									this.settingKey,
+									settingValue
+								);
+							} else {
+								deleteComponentCustomizationSetting(this.settingKey);
+							}
+						} else {
+							this.saveSetting(presets);
+						}
+						presetsSet(this.settingKey, presets);
+						this.setState(this.getInitialState());
+					}
+				}
+			],
+			onClosed: () => {
+				this.setState(this.getInitialState());
+			}
+		};
+	}
+
+	saveSetting = (presets: any) => {
+		this.props.saveComponentCustomizationSetting(
+			this.settingKey,
+			this.createSettingValue(this.tableId, presets)
+		);
+	};
+
+	onShowTableConfigurationPopUp = () => {
+		const {
+			content,
+			dataProvider,
+			presets,
+		} = this.props;
+
+		const headers = (content as ITable).structure.headers;
+		const filters = dataProvider.filters;
+		const sortings = dataProvider.sorting;
+
+		this.setState({
+			tableConfigurationPopupIsVisible: true,
+			headers,
+			filters,
+			sortings,
+			presets: presets[this.settingKey] || []
+		});
+	};
+
+	handleChangeSimpleList = presets => {
+		if (presets) {
+			this.simpleListRefresh = false;
+			this.checkboxWithNameRefresh = false;
+
+			const currentPreset = presets.find(({ active }) => active === true);
+
+			if (currentPreset) {
+				const { headers, filters, sortings, name } = currentPreset;
+
+				this.setState(
+					{
+						headers,
+						filters,
+						sortings,
+						presetName: name,
+						presets
+					},
+					() => {
+						this.simpleListRefresh = true;
+						this.checkboxWithNameRefresh = true;
+					}
+				);
+			} else {
+				const { 
+					headers, 
+					filters,
+					sortings 
+				} = this.defaultPreset;
+
+				const presetName = this.getPresetName(presets);
+
+				this.setState(
+					{
+						headers,
+						filters,
+						sortings,
+						presetName,
+						presets
+					},
+					() => {
+						this.simpleListRefresh = true;
+						this.checkboxWithNameRefresh = true;
+					}
+				);
+			}
+		}
+	};
+
+	getIdFromItem = item => {
+		return item.header.id;
+	};
+
+	itemIsHidden = item => {
+		const { hiddenColumnsIds } = this.props;
+
+		return (
+			hiddenColumnsIds && hiddenColumnsIds.includes(item.header.column.id)
+		);
+	};
+
+	toggleColumnVisibility = headerId => {
+		let headers = Array.from(this.state.headers);
+		const index = headers.findIndex(({ id }) => id === headerId);
+
+		if (index !== -1) {
+			const currentHeader = JSON.parse(JSON.stringify(headers[index]));
+			currentHeader.column.visible = !currentHeader.column.visible;
+			headers[index] = currentHeader;
+			this.setState({ headers });
+
+			this.dndListRefresh = true;
+		}
+	};
+
+	dndListOnChange = bubble => {
+		const { selector, value, item } = bubble;
+
+		this.dndListRefresh = false;
+
+		switch (selector) {
+			case 'visibility':
+				const headerId = item.header.id;
+				this.toggleColumnVisibility(headerId);
+
+				break;
+
+			case 'dnd':
+				const newHeadersOrder = value.map(({ header }) => header);
+				this.setState({ headers: newHeadersOrder }, () => {
+					this.dndListRefresh = true;
+				});
+
+				break;
+
+			default:
+				return null;
+		}
+	};
+
+	getPresetName = presets => {
+		if (!presets) {
+			return `Шаблон 1`;
+		}
+
+		const presetsCount = presets.length;
+		const activePreset = presets.find(({ active }) => active === true);
+
+		if (presetsCount > 0 && activePreset) {
+			return activePreset.name;
+		} else {
+			return `Шаблон ${presetsCount + 1}`;
+		}
+	};
+
+	handleChangeCheckboxWithName = (selector, value) => {
+		this.checkboxWithNameRefresh = false;
+
+		switch (selector) {
+			case 'name':
+				const presetName = value;
+				this.setState({ presetName }, () => {
+					this.checkboxWithNameRefresh = true;
+				});
+				break;
+			case 'checkbox':
+				if (value === false) {
+					const { presets } = this.state;
+					const presetName = this.getPresetName(presets);
+					this.setState({ presetName, savePreset: false }, () => {
+						this.checkboxWithNameRefresh = true;
+					});
+				} else {
+					this.setState({ savePreset: true });
+				}
+				break;
+			default:
+				break;
+		}
+	};
+
+	handleSetDefault = () => {
+		const { customizing } = this.props;
+
+		const { presets } = this.state;
+
+		const { headers, filters, sortings } = this.defaultPreset;
+
+		if (customizing) {
+			this.simpleListRefresh = false;
+			this.checkboxWithNameRefresh = false;
+
+			const newPresets = presets.map(preset => ({ ...preset, active: false }));
+
+			const presetName = this.getPresetName(newPresets);
+
+			this.setState(
+				{
+					headers,
+					filters,
+					sortings,
+					presetName,
+					presets: newPresets
+				},
+				() => {
+					this.simpleListRefresh = true;
+					this.checkboxWithNameRefresh = true;
+				}
+			);
+		} else {
+			this.setState({
+				headers,
+				filters,
+				sortings
+			});
+		}
+	};
+
+	renderPopupContent = () => {
+		const { 
+			allowReorderColumns, 
+			customizing 
+		} = this.props;
+
+		const { 
+			headers, 
+			filters, 
+			sortings, 
+			presets, 
+			presetName 
+		} = this.state;
+
+		const simpleListHeader = {
+			nameLabel: <Lang id='Template' />,
+			checkboxLabel: <i className='fa fa-check-square' />,
+			deleteLabel: <i className='fa fa-trash' />
+		};
+
+		// creating items for DndList
+		const items = headers.map(header => {
+			const filter =
+				filters.length > 0
+					? filters.find(({ fieldId }) => fieldId === header.column.id)
+					: undefined;
+			const sorting =
+				sortings.length > 0
+					? sortings.find(({ fieldId }) => fieldId === header.column.id)
+					: undefined;
+			return {
+				header,
+				filter,
+				sorting
+			};
+		});
+
+		return (
+			<React.Fragment>
+				<div className={'table-setup'}>
+					<div className='table-setup__part'>
+						<div className='column-options__header'>
+							<div className='column-options__header-visibility'>
+								<i className='fa fa-eye' />
+							</div>
+							<div className='column-options__header-title'>
+								<Lang id='Column title' />
+							</div>
+							<div className='column-options__header-sorting'>
+								<i className='fa fa-sort' />
+							</div>
+							<div className='column-options__header-filter-type'>
+								<Lang id='Filter type' />
+							</div>
+							<div className='column-options__header-filter-values'>
+								<Lang id='Filter values' />
+							</div>
+						</div>
+						<DndList
+							allowReorderItems={allowReorderColumns}
+							itemIsHidden={this.itemIsHidden}
+							getIdFromItem={this.getIdFromItem}
+							items={items}
+							ItemComponent={ColumnOptions}
+							onChange={this.dndListOnChange}
+							refresh={this.dndListRefresh}
+							className="column-options-list"
+						/>
+					</div>
+
+					{customizing && (
+						<div className='table-setup__part'>
+							<CheckboxWithName
+								name={presetName === 'current' ? 'Шаблон' : presetName}
+								className='save-preset'
+								label={<Lang id='Save changes' />}
+								onChange={this.handleChangeCheckboxWithName}
+								refresh={this.checkboxWithNameRefresh}
+							/>
+							<SimpleList
+								items={presets}
+								onChange={this.handleChangeSimpleList}
+								refresh={this.simpleListRefresh}
+								itemHeader={simpleListHeader}
+								saveSetting={this.saveSetting}
+							/>
+						</div>
+					)}
+				</div>
+			</React.Fragment>
+		);
+	};
+
+	componentWillUnmount() {
+		const { dataProvider } = this.props;
+		const settingKey = `${this.constructor.name}-presets-${dataProvider.id}`;
+		delete window[settingKey];
+	}
+
+	onMenuItemClick = ({ key }) => {
+		const { 
+			dataProvider, 
+		} = this.props;
+
+		if ( key === 'remove-all-filters' ) {
+			this.removeFilters();
+		}
+
+		if ( dataProvider.filters.find( f => f.fieldId === key ) ) {
+			this.removeFilter(key);
+		}
+
+		if ( key === 'show-hidden-columns' ) {
+			this.onShowAllColumns();
+		}
+
+		if ( key === 'show-popup-table-setup' ) {
+			this.onShowTableConfigurationPopUp();
+		}
+		
+		return null;
+	}
+
+	render() {
+		const { 
+			dataProvider, 
+			allowReorderColumns,
+		} = this.props;
+
+		const filtersCount = dataProvider.filters.length;
+
+		let removeFiltersGroup = [];
+		let showHiddenColumnsGroup = [];
+		let showTableConfigurationInPopup = [];
+
+		if (filtersCount > 0) {
+			if (filtersCount > 1) {
+				removeFiltersGroup.push(
+					<Menu.Item key="remove-all-filters">
+						<i className='fa fa-fw fa-trash' /><Lang id='Remove all filters' />
+					</Menu.Item>
+				);
+			}
+
+			dataProvider.filters.forEach( filter =>
+				removeFiltersGroup.push(
+					<Menu.Item key={filter.fieldId} >
+						<i className='fa fa-fw fa-filter' /><Lang id='Remove filter' />&nbsp;
+						<Lang id={ this.titlesById[filter.fieldId] ? this.titlesById[filter.fieldId] : filter.fieldId } />
+					</Menu.Item>
+				)
+			);
+		}
+
+		let hiddenColumnCount = this.getAllHiddenColumnCount();
+
+		if (hiddenColumnCount > 0) {
+			if (removeFiltersGroup.length) {
+				showHiddenColumnsGroup.push(<Menu.Divider />);
+			}
+
+			showHiddenColumnsGroup.push(
+				<Menu.Item key="show-hidden-columns">
+					<i className='fa fa-fw fa-eye' /><Lang id='Show hidden columns' />
+				</Menu.Item>
+			);
+		}
+
+		showTableConfigurationInPopup.push(
+			<Menu.Item key="show-popup-table-setup">
+				<i className='fa fa-fw fa-table' />{this.titleBarText}
+			</Menu.Item>
+		);
+
+		let setupMenu = [];
+
+		if ( allowReorderColumns ) {
+			setupMenu = [...removeFiltersGroup, ...showHiddenColumnsGroup, ...showTableConfigurationInPopup ];
+		}
+
+		if ( !allowReorderColumns && (filtersCount > 0 || hiddenColumnCount > 0) ) {
+			setupMenu = [...removeFiltersGroup, ...showHiddenColumnsGroup ];
+		}
+
+		const dropDownOverlay = (
+			<Menu 
+				onClick={this.onMenuItemClick}
+				className="setup-menu"
+			>
+				{setupMenu}
+			</Menu>
+		);
+
+		return (
+			<>
+				<Dropdown 
+					overlay={dropDownOverlay} 
+					trigger={['click']}
+					disabled={ !allowReorderColumns && filtersCount == 0 && hiddenColumnCount == 0 }
+				>
+					<i className='fa fa-cog dropdown-icon' />
+				</Dropdown>
+
+				{allowReorderColumns && this.state.tableConfigurationPopupIsVisible && (
+					<Popup config={this.popupConfig}>
+						{this.renderPopupContent()}
+					</Popup>
+				)}
+			</>
+		);
+	}
+}
+
+export default connect<{ presets: IPresets }, IActionsProps, IProps>(
+	(state: any) => ({
+		presets: state.presets
+	}),
+	{
+		dataProviderDeleteFilter,
+		dataProviderDeleteAllFilters,
+		dataProviderDeleteAllFiltersAndSorts,
+		dataProviderSetFilter,
+		dataProviderSort,
+		tableShowAllColumns,
+		tableReorderColumns,
+		saveComponentCustomizationSetting,
+		getComponentCustomizationSetting,
+		deleteComponentCustomizationSetting,
+		presetsSet
+	}
+)(TableSetup);
+
+
+
+interface IColumnOptionsProps {
+	item: {
+		header: any;
+		filter?: any;
+		sorting?: any;
+	};
+}
+
+interface IColumnOptionsActions {
+	onChange?: Function;
+}
+
+class ColumnOptions extends React.Component<
+	IColumnOptionsProps & IColumnOptionsActions
+	> {
+	handleOnChange = (selector, value) => {
+		const { item, onChange } = this.props;
+
+		onChange && onChange({ selector, value, item });
+	};
+
+	render() {
+		const {
+			item: { header, filter, sorting }
+		} = this.props;
+
+		const title = header && header.caption ? header.caption : header.column.id;
+
+		return (
+			<div className='column-options'>
+				<div className='column-options___visibility'>
+					<input
+						type='checkbox'
+						checked={header.column.visible}
+						onChange={this.handleOnChange.bind(this, 'visibility')}
+						className='column-options___visibility--checkbox'
+					/>
+				</div>
+				<div className='column-options___title'>
+					<Lang id={title} />
+				</div>
+				<div className='column-options___sorting'>
+					{sorting && sorting.sorting === 'desc' && (
+						<i className='fa fa-sort-alpha-desc' />
+					)}
+					{sorting && sorting.sorting === 'asc' && (
+						<i className='fa fa-sort-alpha-asc' />
+					)}
+				</div>
+				<div className='column-options___filter-type'>
+					{filter && filter.operation}
+				</div>
+				<div className='column-options___filter-values'>
+					{filter && JSON.stringify(filter.value)}
+				</div>
+			</div>
+		);
+	}
+}
+
+interface ISimpleListProps {
+	items: any;
+	refresh?: boolean;
+	itemHeader?: {
+		nameLabel?: string | JSX.Element;
+		checkboxLabel?: string | JSX.Element;
+		deleteLabel?: string | JSX.Element;
+	};
+}
+
+interface ISimpleListActionsProps {
+	onChange?: Function;
+	saveSetting?: Function;
+}
+
+interface ISimpleListState {
+	items: any;
+}
+
+export class SimpleList extends React.Component<
+	ISimpleListProps & ISimpleListActionsProps,
+	ISimpleListState
+	> {
+	constructor(props: ISimpleListProps & ISimpleListActionsProps) {
+		super(props);
+
+		this.state = this.getStateFromProps(props);
+	}
+
+	getStateFromProps = props => {
+		return { items: props.items ? props.items.map(i => ({ ...i })) : [] };
+	};
+
+	componentWillReceiveProps(nextProps) {
+		if (nextProps.refresh) {
+			const state = this.getStateFromProps(nextProps);
+			this.setState(state);
+		}
+	}
+
+	handleChange = (selector, i) => {
+		const { onChange, saveSetting } = this.props;
+
+		let items = [...this.state.items];
+
+		switch (selector) {
+			case 'activity':
+				if (items[i].active === true) {
+					items[i].active = false;
+				} else {
+					items.forEach(item => {
+						item.active = false;
+					});
+					items[i].active = true;
+				}
+				break;
+
+			case 'delete':
+				items.splice(i, 1);
+				if (!items.some(p => p.active)) {
+					const currentIndex = items.findIndex(p => p.name === 'current');
+					if (currentIndex !== -1) {
+						items[currentIndex].active = true;
+					}
+				}
+				saveSetting(items);
+				break;
+
+			default:
+				break;
+		}
+
+		this.setState({ items });
+		onChange && onChange(items);
+	};
+
+	render() {
+		const { items } = this.state;
+
+		const { itemHeader } = this.props;
+
+		return (
+			<div className='simple-list'>
+				{itemHeader && (
+					<Row className='item-row header'>
+						<Col span={20} className='name-label'>
+							{itemHeader && itemHeader.nameLabel}
+						</Col>
+						<Col span={2} className='checkbox-label'>
+							{itemHeader && itemHeader.checkboxLabel}
+						</Col>
+						<Col span={2} className='delete-label'>
+							{itemHeader && itemHeader.deleteLabel}
+						</Col>
+					</Row>
+				)}
+
+				{items.map((item, i) => (
+					<Row key={i} className='item-row'>
+						<Col span={20}>
+							{item.name === 'current' ? 'Текущий' : item.name}
+						</Col>
+						<Col span={2}>
+							<input
+								type='checkbox'
+								onChange={this.handleChange.bind(this, 'activity', i)}
+								checked={item.active}
+								className='item-active-input'
+							/>
+						</Col>
+						<Col span={2}>
+							{item.name !== 'current' && (
+								<i
+									className='fa fa-trash item-remove-icon'
+									onClick={this.handleChange.bind(this, 'delete', i)}
+								/>
+							)}
+						</Col>
+					</Row>
+				))}
+			</div>
+		);
+	}
+}
+
+interface ICheckboxWithNameProps {
+	name?: string;
+	className?: string;
+	label?: string | JSX.Element;
+	refresh?: boolean;
+}
+
+interface ICheckboxWithNameActions {
+	onChange?: Function;
+}
+
+interface ICheckboxWithNameState {
+	name: string;
+	checked: boolean;
+}
+
+class CheckboxWithName extends React.Component<ICheckboxWithNameProps & ICheckboxWithNameActions, ICheckboxWithNameState> {
+	constructor(props: ICheckboxWithNameProps & ICheckboxWithNameActions) {
+		super(props);
+
+		const name = this.props.name ? this.props.name : '';
+
+		this.state = {
+			name,
+			checked: false
+		};
+	}
+
+	componentWillReceiveProps(nextProps) {
+		if (nextProps.refresh) {
+			const name = nextProps.name ? nextProps.name : '';
+			this.setState({ name });
+		}
+	}
+
+	handleOnChange = (selector, e) => {
+		const { onChange } = this.props;
+
+		let value;
+
+		switch (selector) {
+			case 'checkbox':
+				value = !this.state.checked;
+				this.setState({ checked: !this.state.checked });
+				break;
+
+			case 'name':
+				const name = (value = e.target.value);
+				this.setState({ name });
+				break;
+
+			default:
+				break;
+		}
+
+		onChange && onChange(selector, value);
+	};
+
+	render() {
+		const { checked, name } = this.state;
+
+		const { className, label } = this.props;
+
+		return (
+			<div className={`checkbox-with-name ${className ? className : ''}`}>
+				<div className='checkbox-with-name__checkbox'>
+					<Checkbox
+						onChange={this.handleOnChange.bind(this, 'checkbox')}
+						checked={checked}
+					/>
+				</div>
+				{checked && (
+					<div className='checkbox-with-name__name'>
+						<Form.Item
+							validateStatus={false ? 'error' : undefined}
+							help={false ? 'Ошибка: ' : ''}
+						>
+							<Input
+								value={name === undefined ? '' : name}
+								onChange={this.handleOnChange.bind(this, 'name')}
+							/>
+						</Form.Item>
+					</div>
+				)}
+				{label && !checked && (
+					<div className='checkbox-with-name__label'>{label}</div>
+				)}
+			</div>
+		);
+	}
+}
